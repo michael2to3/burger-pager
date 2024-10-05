@@ -9,6 +9,8 @@
 
 #include "scenes/_setup.h"
 
+extern const char* LOGGING_TAG;
+
 enum {
     ViewMain,
     ViewByteInput,

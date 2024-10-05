@@ -10,8 +10,11 @@ typedef enum {
 } PayloadMode;
 
 struct Payload {
-    uint32_t frequency;
     const char* subghz_protocol;
+    uint32_t frequency;
+    uint32_t bits;
+    uint32_t te;
+    uint32_t repeat;
     PayloadMode mode;
     struct {
         uint8_t counter;

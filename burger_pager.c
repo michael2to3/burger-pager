@@ -1,11 +1,16 @@
 #include "burger_pager.h"
 
 #include <gui/gui.h>
-#include <furi_hal_bt.h>
-#include <extra_beacon.h>
 #include <gui/elements.h>
+#include <lib/subghz/devices/devices.h>
+#include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
+#include <applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h>
+#include <lib/subghz/transmitter.h>
+#include <lib/subghz/protocols/protocol_items.h>
 
 #include "protocols/_protocols.h"
+
+const char* LOGGING_TAG = "burger_pager";
 
 static Attack attacks[] = {
     {
@@ -14,16 +19,17 @@ static Attack attacks[] = {
         .protocol = &protocol_retekess_td112,
         .payload =
             {
-                .frequency = 433920000,
                 .subghz_protocol = "Princeton",
+                .frequency = 433920000,
+                .bits = 24,
+                .te = 280,
+                .repeat = 2,
                 .cfg.retekess_td112 =
                     {
                         .state = RetekessTd112StateBeep,
                     },
             },
     },
-    {},
-    {},
     {}};
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
@@ -39,8 +45,10 @@ typedef struct {
 
     bool advertising;
     uint8_t delay;
-    GapExtraBeaconConfig config;
     FuriThread* thread;
+    const SubGhzDevice* device;
+    FlipperFormat* flipper_format;
+    SubGhzEnvironment* environment;
     int8_t index;
     bool ignore_bruteforce;
 } State;
@@ -76,27 +84,59 @@ static void stop_blink(State* state) {
     notification_message_block(state->ctx.notification, &sequence_blink_stop);
 }
 
-static void start_extra_beacon(State* state) {
+static void start_tx(State* state) {
+    uint16_t delay = delays[state->delay];
+    UNUSED(delay); // @TODO
+    Payload* payload = &attacks[state->index].payload;
+
+    const Protocol* protocol = attacks[state->index].protocol;
+    furi_assert(protocol != NULL);
     uint8_t size;
     uint8_t* packet;
-    uint16_t delay = delays[state->delay];
-    GapExtraBeaconConfig* config = &state->config;
-    Payload* payload = &attacks[state->index].payload;
-    const Protocol* protocol = attacks[state->index].protocol;
+    protocol->make_packet(&size, &packet, payload);
 
-    config->min_adv_interval_ms = delay;
-    config->max_adv_interval_ms = delay * 1.5;
-    furi_check(furi_hal_bt_extra_beacon_set_config(config));
+    FURI_LOG_I(
+        LOGGING_TAG,
+        "Change SubGHz module Protocol: %s, Bit: %lu, Key: %.*s, TE: %lu, Repeat: %lu",
+        payload->subghz_protocol,
+        (unsigned long)payload->bits,
+        size * 3 + 1,
+        ({
+            static char temp[256];
+            for(uint8_t i = 0; i < size; i++) {
+                snprintf(&temp[i * 3], sizeof(temp) - i * 3, "%02X ", packet[i]);
+            }
+            temp;
+        }),
+        payload->te,
+        payload->repeat);
 
-    if(protocol) {
-        protocol->make_packet(&size, &packet, payload);
-    } else {
-        protocols[rand() % protocols_count]->make_packet(&size, &packet, NULL);
-    }
-    furi_check(furi_hal_bt_extra_beacon_set_data(packet, size));
+    subghz_environment_set_protocol_registry(state->environment, (void*)&subghz_protocol_registry);
+    SubGhzTransmitter* transmitter =
+        subghz_transmitter_alloc_init(state->environment, payload->subghz_protocol);
+    FlipperFormat* flipper_format = state->flipper_format;
+    flipper_format_insert_or_update_string_cstr(flipper_format, "Protocol", "Princeton");
+    flipper_format_insert_or_update_uint32(flipper_format, "Bit", &payload->bits, 1);
+    flipper_format_insert_or_update_hex(flipper_format, "Key", packet, size);
+    flipper_format_insert_or_update_uint32(flipper_format, "TE", &payload->te, 1);
+    flipper_format_insert_or_update_uint32(flipper_format, "Repeat", &payload->repeat, 1);
+    flipper_format_rewind(flipper_format);
+
+    SubGhzProtocolStatus status = subghz_transmitter_deserialize(transmitter, flipper_format);
+    furi_assert(status == SubGhzProtocolStatusOk);
+
+    FURI_LOG_D(LOGGING_TAG, "Successfully deserialized");
+
+    subghz_devices_load_preset(state->device, FuriHalSubGhzPresetOok650Async, NULL);
+    uint32_t frequency = subghz_devices_set_frequency(state->device, payload->frequency);
+
+    FURI_LOG_D(LOGGING_TAG, "Changed frequency to %lu", frequency);
+
+    furi_hal_power_suppress_charge_enter();
+
+    subghz_devices_start_async_tx(state->device, subghz_transmitter_yield, transmitter);
+    subghz_transmitter_free(transmitter);
     free(packet);
-
-    furi_check(furi_hal_bt_extra_beacon_start());
 }
 
 static int32_t adv_thread(void* _ctx) {
@@ -104,8 +144,8 @@ static int32_t adv_thread(void* _ctx) {
     Payload* payload = &attacks[state->index].payload;
     const Protocol* protocol = attacks[state->index].protocol;
     start_blink(state);
-    if(furi_hal_bt_extra_beacon_is_active()) {
-        furi_check(furi_hal_bt_extra_beacon_stop());
+    if(subghz_devices_is_async_complete_tx(state->device)) {
+        subghz_devices_stop_async_tx(state->device);
     }
 
     while(state->advertising) {
@@ -116,10 +156,10 @@ static int32_t adv_thread(void* _ctx) {
                 (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
         }
 
-        start_extra_beacon(state);
+        start_tx(state);
 
         furi_thread_flags_wait(true, FuriFlagWaitAny, delays[state->delay]);
-        furi_check(furi_hal_bt_extra_beacon_stop());
+        subghz_devices_stop_async_tx(state->device);
     }
 
     stop_blink(state);
@@ -441,16 +481,16 @@ static bool input_callback(InputEvent* input, void* _ctx) {
                 }
             } else {
                 if(!advertising) {
-                    if(furi_hal_bt_extra_beacon_is_active()) {
-                        furi_check(furi_hal_bt_extra_beacon_stop());
+                    if(subghz_devices_is_async_complete_tx(state->device)) {
+                        subghz_devices_stop_async_tx(state->device);
                     }
 
-                    start_extra_beacon(state);
+                    start_tx(state);
 
                     if(state->ctx.led_indicator)
                         notification_message(state->ctx.notification, &solid_message);
                     furi_delay_ms(10);
-                    furi_check(furi_hal_bt_extra_beacon_stop());
+                    subghz_devices_stop_async_tx(state->device);
 
                     if(state->ctx.led_indicator)
                         notification_message_block(state->ctx.notification, &sequence_reset_rgb);
@@ -518,19 +558,23 @@ static bool back_event_callback(void* _ctx) {
 
 int32_t burger_pager(void* p) {
     UNUSED(p);
-    GapExtraBeaconConfig prev_cfg;
-    const GapExtraBeaconConfig* prev_cfg_ptr = furi_hal_bt_extra_beacon_get_config();
-    if(prev_cfg_ptr) {
-        memcpy(&prev_cfg, prev_cfg_ptr, sizeof(prev_cfg));
-    }
-    uint8_t prev_data[EXTRA_BEACON_MAX_DATA_SIZE];
-    uint8_t prev_data_len = furi_hal_bt_extra_beacon_get_data(prev_data);
-    bool prev_active = furi_hal_bt_extra_beacon_is_active();
-
     State* state = malloc(sizeof(State));
-    state->config.adv_channel_map = GapAdvChannelMapAll;
-    state->config.adv_power_level = GapAdvPowerLevel_6dBm;
-    state->config.address_type = GapAddressTypePublic;
+    furi_assert(state != NULL);
+
+    subghz_devices_init();
+    state->device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
+    furi_assert(state->device != NULL);
+    subghz_devices_begin(state->device);
+    subghz_devices_reset(state->device);
+    if(subghz_devices_is_async_complete_tx(state->device)) {
+        subghz_devices_stop_async_tx(state->device);
+    }
+
+    state->environment = subghz_environment_alloc();
+    furi_assert(state->environment != NULL);
+    state->flipper_format = flipper_format_string_alloc();
+    furi_assert(state->flipper_format != NULL);
+
     state->thread = furi_thread_alloc();
     furi_thread_set_callback(state->thread, adv_thread);
     furi_thread_set_context(state->thread, state);
@@ -600,17 +644,18 @@ int32_t burger_pager(void* p) {
 
     furi_timer_free(state->lock_timer);
     furi_thread_free(state->thread);
+
+    subghz_devices_sleep(state->device);
+    subghz_devices_end(state->device);
+
+    subghz_devices_deinit();
+
+    furi_hal_power_suppress_charge_exit();
+
+    flipper_format_free(state->flipper_format);
+    subghz_environment_free(state->environment);
+
     free(state);
 
-    if(furi_hal_bt_extra_beacon_is_active()) {
-        furi_check(furi_hal_bt_extra_beacon_stop());
-    }
-    if(prev_cfg_ptr) {
-        furi_check(furi_hal_bt_extra_beacon_set_config(&prev_cfg));
-    }
-    furi_check(furi_hal_bt_extra_beacon_set_data(prev_data, prev_data_len));
-    if(prev_active) {
-        furi_check(furi_hal_bt_extra_beacon_start());
-    }
     return 0;
 }
