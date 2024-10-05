@@ -1,0 +1,35 @@
+#pragma once
+
+#include "retekess_td112.h"
+
+typedef enum {
+    PayloadModeFind,
+    PayloadModeRandom,
+    PayloadModeValue,
+    PayloadModeBruteforce,
+} PayloadMode;
+
+struct Payload {
+    uint32_t frequency;
+    const char* subghz_protocol;
+    PayloadMode mode;
+    struct {
+        uint8_t counter;
+        uint32_t value;
+        uint8_t size;
+    } bruteforce;
+    union {
+        RetekessTd112Cfg retekess_td112;
+    } cfg;
+};
+
+extern const Protocol* protocols[];
+
+extern const size_t protocols_count;
+
+struct Attack {
+    const char* title;
+    const char* text;
+    const Protocol* protocol;
+    Payload payload;
+};
