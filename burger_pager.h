@@ -6,6 +6,18 @@
 #include <gui/modules/submenu.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/variable_item_list.h>
+#include <gui/gui.h>
+#include <gui/elements.h>
+#include <lib/subghz/devices/devices.h>
+#include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
+#include <applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h>
+#include <lib/subghz/transmitter.h>
+#include <furi.h>
+#include <furi_hal.h>
+#include <lib/subghz/receiver.h>
+#include <lib/subghz/devices/devices.h>
+#include <lib/subghz/receiver.h>
+#include <lib/subghz/protocols/protocol_items.h>
 
 #include "scenes/_setup.h"
 
@@ -43,3 +55,32 @@ typedef struct {
     TextInput* text_input;
     VariableItemList* variable_item_list;
 } Ctx;
+
+typedef struct {
+    Ctx ctx;
+    View* main_view;
+    bool lock_warning;
+    uint8_t lock_count;
+    FuriTimer* lock_timer;
+
+    bool advertising;
+    uint8_t delay;
+    FuriThread* thread;
+
+    int8_t index;
+    bool ignore_bruteforce;
+
+    // SubGhz
+    const SubGhzDevice* device;
+    FlipperFormat* flipper_format;
+    SubGhzEnvironment* environment;
+
+    // SubGhz Rx
+    FuriStreamBuffer* stream;
+    SubGhzReceiver* receiver;
+} State;
+
+typedef struct {
+    uint32_t key;
+    bool received;
+} ReceiverContext;

@@ -15,6 +15,7 @@ struct Payload {
     uint32_t bits;
     uint32_t te;
     uint32_t repeat;
+    uint32_t guard_time;
     PayloadMode mode;
     struct {
         uint8_t counter;

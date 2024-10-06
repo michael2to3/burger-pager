@@ -6,20 +6,36 @@ static const char* get_name(const Payload* payload) {
     return "retekess_td112";
 }
 
+uint8_t reverse_byte(uint8_t b) {
+    b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4);
+    b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2);
+    b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1);
+    return b;
+}
+
+void encode_retekess_td112(uint16_t station_id, uint16_t pager_id, uint8_t* packet) {
+    for(int i = 0; i < 8; i++) {
+        packet[i] = 0;
+    }
+
+    uint16_t base_key = station_id & 0x0FFF;
+
+    uint8_t group_num_input = (pager_id / 256) << 2;
+    uint8_t group_num_reversed = reverse_byte(group_num_input);
+    uint8_t group_number = (group_num_reversed >> 4) & 0x0F;
+
+    uint8_t pager_key_input = pager_id % 256;
+    uint8_t pager_key_reversed = reverse_byte(pager_key_input);
+
+    uint32_t key = (base_key << 12) | (group_number << 8) | pager_key_reversed;
+
+    packet[0] = (uint8_t)((key >> 16) & 0xFF);
+    packet[1] = (uint8_t)((key >> 8) & 0xFF);
+    packet[2] = (uint8_t)(key & 0xFF);
+}
+
 static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
     RetekessTd112Cfg* cfg = &payload->cfg.retekess_td112;
-
-    RetekessTd112State state;
-    UNUSED(state);
-    if(cfg && cfg->state != 0x00) {
-        state = cfg->state;
-    } else {
-        const RetekessTd112State states[] = {
-            RetekessTd112StateBeep,
-            RetekessTd112StateTurnOff,
-        };
-        state = states[rand() % COUNT_OF(states)];
-    }
 
     uint16_t station_id;
     switch(cfg ? payload->mode : PayloadModeRandom) {
@@ -36,15 +52,17 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
         break;
     }
 
-    uint8_t size = 8;
+    station_id = 107;
+
+    uint8_t size = 3;
     uint8_t* packet = (uint8_t*)calloc(size, sizeof(uint8_t));
 
-    uint32_t key = (station_id << 12) | (cfg->pager_id & 0x0FFF);
+    const uint16_t action_turnoff = 1005;
+    encode_retekess_td112(
+        station_id,
+        cfg->state == RetekessTd112StateTurnOff ? action_turnoff : 3,
+        packet);
 
-    uint8_t i = 0;
-    packet[i++] = (key >> 16) & 0xFF;
-    packet[i++] = (key >> 8) & 0xFF;
-    packet[i++] = key & 0xFF;
     *_size = size;
     *_packet = packet;
 }

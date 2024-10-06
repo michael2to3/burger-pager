@@ -1,14 +1,14 @@
 #include "burger_pager.h"
-
-#include <gui/gui.h>
-#include <gui/elements.h>
-#include <lib/subghz/devices/devices.h>
-#include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
-#include <applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h>
-#include <lib/subghz/transmitter.h>
-#include <lib/subghz/protocols/protocol_items.h>
-
 #include "protocols/_protocols.h"
+
+#include <furi.h>
+#include <furi_hal.h>
+#include <lib/subghz/receiver.h>
+#include <lib/subghz/protocols/protocol_items.h>
+#include <lib/subghz/protocols/princeton.h>
+#include <furi_hal_subghz.h>
+#include <notification/notification_messages.h>
+#include <core/stream_buffer.h>
 
 const char* LOGGING_TAG = "burger_pager";
 
@@ -22,36 +22,38 @@ static Attack attacks[] = {
                 .subghz_protocol = "Princeton",
                 .frequency = 433920000,
                 .bits = 24,
-                .te = 280,
-                .repeat = 2,
+                .te = 228,
+                .repeat = 10,
+                .guard_time = 30,
                 .cfg.retekess_td112 =
                     {
                         .state = RetekessTd112StateBeep,
                     },
             },
     },
-    {}};
+    {
+        .title = "TD112 Turn off",
+        .text = "Turn off all doc pagers",
+        .protocol = &protocol_retekess_td112,
+        .payload =
+            {
+                .subghz_protocol = "Princeton",
+                .frequency = 433920000,
+                .bits = 24,
+                .te = 228,
+                .repeat = 10,
+                .guard_time = 30,
+                .cfg.retekess_td112 =
+                    {
+                        .state = RetekessTd112StateTurnOff,
+                    },
+            },
+    },
+};
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
 
 static uint16_t delays[] = {20, 50, 100, 200, 500};
-
-typedef struct {
-    Ctx ctx;
-    View* main_view;
-    bool lock_warning;
-    uint8_t lock_count;
-    FuriTimer* lock_timer;
-
-    bool advertising;
-    uint8_t delay;
-    FuriThread* thread;
-    const SubGhzDevice* device;
-    FlipperFormat* flipper_format;
-    SubGhzEnvironment* environment;
-    int8_t index;
-    bool ignore_bruteforce;
-} State;
 
 const NotificationSequence solid_message = {
     &message_red_0,
@@ -100,7 +102,7 @@ static void start_tx(State* state) {
         "Change SubGHz module Protocol: %s, Bit: %lu, Key: %.*s, TE: %lu, Repeat: %lu",
         payload->subghz_protocol,
         (unsigned long)payload->bits,
-        size * 3 + 1,
+        size * 3,
         ({
             static char temp[256];
             for(uint8_t i = 0; i < size; i++) {
@@ -111,7 +113,6 @@ static void start_tx(State* state) {
         payload->te,
         payload->repeat);
 
-    subghz_environment_set_protocol_registry(state->environment, (void*)&subghz_protocol_registry);
     SubGhzTransmitter* transmitter =
         subghz_transmitter_alloc_init(state->environment, payload->subghz_protocol);
     FlipperFormat* flipper_format = state->flipper_format;
@@ -120,6 +121,7 @@ static void start_tx(State* state) {
     flipper_format_insert_or_update_hex(flipper_format, "Key", packet, size);
     flipper_format_insert_or_update_uint32(flipper_format, "TE", &payload->te, 1);
     flipper_format_insert_or_update_uint32(flipper_format, "Repeat", &payload->repeat, 1);
+    flipper_format_insert_or_update_uint32(flipper_format, "Guard_time", &payload->guard_time, 1);
     flipper_format_rewind(flipper_format);
 
     SubGhzProtocolStatus status = subghz_transmitter_deserialize(transmitter, flipper_format);
@@ -139,6 +141,69 @@ static void start_tx(State* state) {
     free(packet);
 }
 
+static void subghz_capture_callback(bool level, uint32_t duration, void* _state) {
+    State* state = (State*)_state;
+    LevelDuration level_duration = level_duration_make(level, duration);
+    furi_stream_buffer_send(state->stream, &level_duration, sizeof(LevelDuration), 0);
+}
+static void subghz_receiver_callback(
+    SubGhzReceiver* receiver,
+    SubGhzProtocolDecoderBase* decoder_base,
+    void* state) {
+    Payload* payload = &attacks[state->index].payload;
+
+    if(decoder_base->protocol->type == SubGhzProtocolTypeStatic) {
+        FuriString* buffer = furi_string_alloc();
+        subghz_protocol_decoder_base_get_string(decoder_base, buffer);
+        subghz_receiver_reset(receiver);
+        FURI_LOG_I(LOGGING_TAG, "Captured:\r\n%s", furi_string_get_cstr(buffer));
+    }
+    subghz_receiver_reset(receiver);
+}
+
+void start_rx(State* state) {
+    Payload* payload = &attacks[state->index].payload;
+
+    furi_hal_power_suppress_charge_enter();
+
+    subghz_receiver_set_filter(state->receiver, SubGhzProtocolFlag_Decodable);
+    subghz_receiver_set_rx_callback(state->receiver, subghz_receiver_callback, NULL);
+
+    furi_hal_subghz_reset();
+    subghz_devices_load_preset(state->device, FuriHalSubGhzPresetOok650Async, NULL);
+    uint32_t frequency = subghz_devices_set_frequency(state->device, payload->frequency);
+    FURI_LOG_D(LOGGING_TAG, "Changed frequency to %lu", frequency);
+
+    furi_hal_subghz_start_async_rx(subghz_capture_callback, state);
+
+    FURI_LOG_I(
+        LOGGING_TAG,
+        "Listening for Princeton %lu-bit signals at %lu",
+        payload->bits,
+        payload->frequency);
+
+    while(true) {
+        LevelDuration level_duration;
+        size_t received =
+            furi_stream_buffer_receive(state->stream, &level_duration, sizeof(LevelDuration), 100);
+        if(received == sizeof(LevelDuration)) {
+            bool level = level_duration_get_level(level_duration);
+            uint32_t duration = level_duration_get_duration(level_duration);
+            subghz_receiver_decode(state->receiver, level, duration);
+        }
+    }
+
+    furi_hal_subghz_stop_async_rx();
+    furi_hal_subghz_sleep();
+}
+
+static void start_attack(State* state) {
+    start_rx(state);
+    if(false) {
+        start_tx(state);
+    }
+}
+
 static int32_t adv_thread(void* _ctx) {
     State* state = _ctx;
     Payload* payload = &attacks[state->index].payload;
@@ -156,7 +221,7 @@ static int32_t adv_thread(void* _ctx) {
                 (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
         }
 
-        start_tx(state);
+        start_attack(state);
 
         furi_thread_flags_wait(true, FuriFlagWaitAny, delays[state->delay]);
         subghz_devices_stop_async_tx(state->device);
@@ -485,7 +550,7 @@ static bool input_callback(InputEvent* input, void* _ctx) {
                         subghz_devices_stop_async_tx(state->device);
                     }
 
-                    start_tx(state);
+                    start_attack(state);
 
                     if(state->ctx.led_indicator)
                         notification_message(state->ctx.notification, &solid_message);
@@ -556,11 +621,7 @@ static bool back_event_callback(void* _ctx) {
     return scene_manager_handle_back_event(state->ctx.scene_manager);
 }
 
-int32_t burger_pager(void* p) {
-    UNUSED(p);
-    State* state = malloc(sizeof(State));
-    furi_assert(state != NULL);
-
+int32_t init_subghz(State* state) {
     subghz_devices_init();
     state->device = subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME);
     furi_assert(state->device != NULL);
@@ -574,6 +635,65 @@ int32_t burger_pager(void* p) {
     furi_assert(state->environment != NULL);
     state->flipper_format = flipper_format_string_alloc();
     furi_assert(state->flipper_format != NULL);
+
+    state->stream = furi_stream_buffer_alloc(sizeof(LevelDuration) * 1024, sizeof(LevelDuration));
+    subghz_environment_set_protocol_registry(state->environment, &subghz_protocol_registry);
+    state->receiver = subghz_receiver_alloc_init(state->environment);
+
+    return 0;
+}
+
+int32_t subghz_free(State* state) {
+    subghz_devices_sleep(state->device);
+    subghz_devices_end(state->device);
+
+    subghz_devices_deinit();
+
+    furi_hal_power_suppress_charge_exit();
+
+    flipper_format_free(state->flipper_format);
+    subghz_environment_free(state->environment);
+
+    subghz_receiver_free(state->receiver);
+    furi_stream_buffer_free(state->stream);
+
+    return 0;
+}
+int32_t state_free(State* state) {
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewByteInput);
+    byte_input_free(state->ctx.byte_input);
+
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewSubmenu);
+    submenu_free(state->ctx.submenu);
+
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewTextInput);
+    text_input_free(state->ctx.text_input);
+
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewVariableItemList);
+    variable_item_list_free(state->ctx.variable_item_list);
+
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewMain);
+    view_free(state->main_view);
+
+    scene_manager_free(state->ctx.scene_manager);
+    view_dispatcher_free(state->ctx.view_dispatcher);
+    furi_record_close(RECORD_GUI);
+    furi_record_close(RECORD_NOTIFICATION);
+
+    furi_timer_free(state->lock_timer);
+    furi_thread_free(state->thread);
+
+    subghz_free(state);
+    free(state);
+
+    return 0;
+}
+int32_t burger_pager(void* p) {
+    UNUSED(p);
+    State* state = malloc(sizeof(State));
+    furi_assert(state != NULL);
+
+    init_subghz(state);
 
     state->thread = furi_thread_alloc();
     furi_thread_set_callback(state->thread, adv_thread);
@@ -622,40 +742,7 @@ int32_t burger_pager(void* p) {
     scene_manager_next_scene(state->ctx.scene_manager, SceneMain);
     view_dispatcher_run(state->ctx.view_dispatcher);
 
-    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewByteInput);
-    byte_input_free(state->ctx.byte_input);
-
-    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewSubmenu);
-    submenu_free(state->ctx.submenu);
-
-    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewTextInput);
-    text_input_free(state->ctx.text_input);
-
-    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewVariableItemList);
-    variable_item_list_free(state->ctx.variable_item_list);
-
-    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewMain);
-    view_free(state->main_view);
-
-    scene_manager_free(state->ctx.scene_manager);
-    view_dispatcher_free(state->ctx.view_dispatcher);
-    furi_record_close(RECORD_GUI);
-    furi_record_close(RECORD_NOTIFICATION);
-
-    furi_timer_free(state->lock_timer);
-    furi_thread_free(state->thread);
-
-    subghz_devices_sleep(state->device);
-    subghz_devices_end(state->device);
-
-    subghz_devices_deinit();
-
-    furi_hal_power_suppress_charge_exit();
-
-    flipper_format_free(state->flipper_format);
-    subghz_environment_free(state->environment);
-
-    free(state);
+    state_free(state);
 
     return 0;
 }
