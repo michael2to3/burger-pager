@@ -79,8 +79,3 @@ typedef struct {
     FuriStreamBuffer* stream;
     SubGhzReceiver* receiver;
 } State;
-
-typedef struct {
-    uint32_t key;
-    bool received;
-} ReceiverContext;

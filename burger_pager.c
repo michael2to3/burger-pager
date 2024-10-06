@@ -10,6 +10,8 @@
 #include <notification/notification_messages.h>
 #include <core/stream_buffer.h>
 
+#include "helpers/string.h"
+
 const char* LOGGING_TAG = "burger_pager";
 
 static Attack attacks[] = {
@@ -86,7 +88,7 @@ static void stop_blink(State* state) {
     notification_message_block(state->ctx.notification, &sequence_blink_stop);
 }
 
-static void start_tx(State* state) {
+static void subghz_send_attack(State* state) {
     uint16_t delay = delays[state->delay];
     UNUSED(delay); // @TODO
     Payload* payload = &attacks[state->index].payload;
@@ -149,19 +151,35 @@ static void subghz_capture_callback(bool level, uint32_t duration, void* _state)
 static void subghz_receiver_callback(
     SubGhzReceiver* receiver,
     SubGhzProtocolDecoderBase* decoder_base,
-    void* state) {
+    void* _state) {
+    State* state = (State*)_state;
     Payload* payload = &attacks[state->index].payload;
+    UNUSED(payload);
 
     if(decoder_base->protocol->type == SubGhzProtocolTypeStatic) {
         FuriString* buffer = furi_string_alloc();
         subghz_protocol_decoder_base_get_string(decoder_base, buffer);
         subghz_receiver_reset(receiver);
         FURI_LOG_I(LOGGING_TAG, "Captured:\r\n%s", furi_string_get_cstr(buffer));
+
+        const uint8_t size_package = 3;
+        uint8_t package[size_package];
+        memset(package, 0, size_package);
+        char* key_str = alloc_extract_value_from_string("Key", furi_string_get_cstr(buffer));
+        convert_key_to_data(key_str, package, size_package);
+        UNUSED(key_str);
+
+        FURI_LOG_D(
+            LOGGING_TAG,
+            "Success parsed captured package to %02X %02X %02X",
+            package[0],
+            package[1],
+            package[2]);
     }
     subghz_receiver_reset(receiver);
 }
 
-void start_rx(State* state) {
+void subghz_find_station(State* state) {
     Payload* payload = &attacks[state->index].payload;
 
     furi_hal_power_suppress_charge_enter();
@@ -198,9 +216,9 @@ void start_rx(State* state) {
 }
 
 static void start_attack(State* state) {
-    start_rx(state);
+    subghz_find_station(state);
     if(false) {
-        start_tx(state);
+        subghz_send_attack(state);
     }
 }
 
