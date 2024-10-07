@@ -21,8 +21,7 @@
 
 #include "scenes/_setup.h"
 #include "helpers/int_input.h"
-
-extern const char* LOGGING_TAG;
+#include <stdint.h>
 
 enum {
     ViewMain,
@@ -44,6 +43,7 @@ typedef struct Attack Attack;
 typedef struct {
     Attack* attack;
     uint8_t byte_store[3];
+    char text_store[64];
     VariableItemListEnterCallback fallback_config_enter;
     bool led_indicator;
     bool lock_keyboard;

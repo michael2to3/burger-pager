@@ -11,8 +11,7 @@
 #include <core/stream_buffer.h>
 
 #include "helpers/string.h"
-
-const char* LOGGING_TAG = "burger_pager";
+#include "helpers/log.h"
 
 static Attack attacks[] = {
     {
@@ -25,7 +24,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 10,
+                .repeat = 3,
                 .guard_time = 30,
                 .cfg.retekess_td112 =
                     {
@@ -43,7 +42,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 10,
+                .repeat = 3,
                 .guard_time = 30,
                 .cfg.retekess_td112 =
                     {
@@ -218,9 +217,9 @@ void subghz_find_station(State* state) {
 }
 
 static void start_attack(State* state) {
-    subghz_find_station(state);
+    subghz_send_attack(state);
     if(false) {
-        subghz_send_attack(state);
+        subghz_find_station(state);
     }
 }
 
@@ -234,7 +233,9 @@ static int32_t adv_thread(void* _ctx) {
     }
 
     while(state->advertising) {
-        if(protocol && payload->mode == PayloadModeBruteforce &&
+        if(protocol &&
+           (payload->mode == PayloadModeBruteforce ||
+            payload->mode == PayloadModeFindAndBruteforce) &&
            payload->bruteforce.counter++ >= 10) {
             payload->bruteforce.counter = 0;
             payload->bruteforce.value =
