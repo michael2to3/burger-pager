@@ -13,10 +13,10 @@ Burger Pager is a Flipper Zero app modified from the original `ble_spam` to work
 
 | Pager Model          | Call | Turn Off | Tested |
 |----------------------|------|----------|--------|
-| **Retekess TD112**   | ✅   | ✅       | Yes    |
-| ~~Retekess TD157~~   | ❌   | ❌       | No     |
-| ~~Kromix W2270~~     | ❌   | ❌       | No     |
-| ~~Retekess TD158~~   | ❌   | ❌       | No     |
+| Retekess TD112   | ✅   | ✅       | Yes    |
+| Retekess TD157   | ✅   | ✅       | No    |
+| Kromix W2270     | ✅   | ✅       | No    |
+| Retekess TD158   | ✅   | ✅       | No    |
 
 ## How to Build and Run
 
