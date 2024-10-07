@@ -291,14 +291,6 @@ static int32_t adv_thread(void* _ctx) {
         Payload* payload = &attacks[state->index].payload;
         const Protocol* protocol = attacks[state->index].protocol;
 
-        FURI_LOG_D(
-            LOGGING_TAG,
-            "Bruteforce counter: %u, value: %lu, size: %u, limit: %u",
-            payload->bruteforce.counter,
-            payload->bruteforce.value,
-            payload->bruteforce.size,
-            payload->bruteforce.counter_limit);
-
         if(protocol &&
            (payload->mode == PayloadModeBruteforce ||
             payload->mode == PayloadModeFindAndBruteforce) &&
@@ -374,7 +366,7 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
     canvas_set_font(canvas, FontSecondary);
     const Icon* icon = protocol ? protocol->icon : &I_burger_pager;
     canvas_draw_icon(canvas, 4 - (icon == &I_burger_pager), 3, icon);
-    canvas_draw_str(canvas, 14, 12, "Burger Pager");
+    canvas_draw_str(canvas, 14, 12, "BPager");
 
     switch(state->index) {
     case PageHelpBruteforce:
