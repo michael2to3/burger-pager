@@ -13,8 +13,6 @@
 #include "helpers/string.h"
 #include "helpers/log.h"
 
-#define SEND_ATTACK_DURATION_MS  10000
-
 static Attack attacks[] = {
     {
         .title = "TD112 Call all pagers",
@@ -56,7 +54,7 @@ static Attack attacks[] = {
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
 
-static uint16_t delays[] = {20, 50, 100, 200, 500};
+static uint16_t delays[] = {5, 10, 20, 50};
 
 const NotificationSequence solid_message = {
     &message_red_0,
@@ -79,7 +77,7 @@ const NotificationSequence blink_sequence = {
 };
 static void start_blink(State* state) {
     if(!state->ctx.led_indicator) return;
-    uint16_t period = delays[state->delay];
+    uint16_t period = delays[state->delay] * 20;
     if(period <= 100) period += 30;
     blink_message.data.led_blink.period = period;
     notification_message_block(state->ctx.notification, &blink_sequence);
@@ -237,11 +235,11 @@ static void stop_attack(State* state) {
         subghz_devices_stop_async_tx(state->device);
     }
 }
-
-static void start_attack(State* state) {
+static void start_find_and_bruteforce(State* state) {
+    uint16_t period = delays[state->delay];
+    uint32_t duration = period * 1000;
     uint32_t current_time = furi_get_tick();
     uint32_t elapsed_time = current_time - state->last_switch_time;
-
     if(state->is_find_station) {
         if(state->packet_found) {
             state->packet_found = false;
@@ -262,7 +260,7 @@ static void start_attack(State* state) {
             }
         }
     } else {
-        if(elapsed_time >= SEND_ATTACK_DURATION_MS) {
+        if(elapsed_time >= duration) {
             state->is_find_station = true;
             state->last_switch_time = current_time;
             if(subghz_devices_is_async_complete_tx(state->device)) {
@@ -273,7 +271,16 @@ static void start_attack(State* state) {
         }
     }
 }
+static void start_attack(State* state) {
+    Payload* payload = &attacks[state->index].payload;
 
+    if(payload->mode == PayloadModeFindAndBruteforce) {
+        start_find_and_bruteforce(state);
+    } else {
+        subghz_send_attack(state);
+        state->is_find_station = false;
+    }
+}
 static int32_t adv_thread(void* _ctx) {
     State* state = _ctx;
     start_blink(state);
@@ -283,6 +290,14 @@ static int32_t adv_thread(void* _ctx) {
     while(state->advertising) {
         Payload* payload = &attacks[state->index].payload;
         const Protocol* protocol = attacks[state->index].protocol;
+
+        FURI_LOG_D(
+            LOGGING_TAG,
+            "Bruteforce counter: %u, value: %lu, size: %u, limit: %u",
+            payload->bruteforce.counter,
+            payload->bruteforce.value,
+            payload->bruteforce.size,
+            payload->bruteforce.counter_limit);
 
         if(protocol &&
            (payload->mode == PayloadModeBruteforce ||
@@ -359,7 +374,7 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
     canvas_set_font(canvas, FontSecondary);
     const Icon* icon = protocol ? protocol->icon : &I_burger_pager;
     canvas_draw_icon(canvas, 4 - (icon == &I_burger_pager), 3, icon);
-    canvas_draw_str(canvas, 14, 12, "BLE Spam");
+    canvas_draw_str(canvas, 14, 12, "Burger Pager");
 
     switch(state->index) {
     case PageHelpBruteforce:
@@ -477,7 +492,7 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
                 payload->bruteforce.size * 2,
                 payload->bruteforce.value);
         } else {
-            snprintf(str, sizeof(str), "%ims", delays[state->delay]);
+            snprintf(str, sizeof(str), "%is", delays[state->delay]);
         }
         canvas_draw_str_aligned(canvas, 116, 12, AlignRight, AlignBottom, str);
         canvas_draw_icon(canvas, 119, 6, &I_SmallArrowUp_3x5);
@@ -487,7 +502,7 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
         if(payload->mode == PayloadModeBruteforce) {
             canvas_draw_str_aligned(canvas, 64, 22, AlignCenter, AlignBottom, "Bruteforce");
             if(delays[state->delay] < 100) {
-                snprintf(str, sizeof(str), "%ims>", delays[state->delay]);
+                snprintf(str, sizeof(str), "%is>", delays[state->delay]);
             } else {
                 snprintf(str, sizeof(str), "%.1fs>", (double)delays[state->delay] / 1000);
             }
