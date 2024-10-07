@@ -322,13 +322,12 @@ static void toggle_adv(State* state) {
     }
 }
 
-#define PAGE_MIN (-5)
+#define PAGE_MIN (-4)
 #define PAGE_MAX ATTACKS_COUNT
 enum {
     PageHelpBruteforce = PAGE_MIN,
     PageHelpApps,
     PageHelpDelay,
-    PageHelpDistance,
     PageHelpInfoConfig,
     PageStart = 0,
     PageEnd = ATTACKS_COUNT - 1,
@@ -380,10 +379,9 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
             48,
             AlignLeft,
             AlignTop,
-            "\e#Bruteforce\e# cycles codes\n"
-            "to find popups, hold left and\n"
-            "right to send manually and\n"
-            "change delay",
+            "\e#Bruteforce\e# cycles codes to\n"
+            "ctrl pagers: power off, chg\n"
+            "ringtones, vibrate, etc.",
             false);
         break;
     case PageHelpApps:
@@ -413,25 +411,9 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
             48,
             AlignLeft,
             AlignTop,
-            "\e#Delay\e# is time between\n"
-            "attack attempts (top right),\n"
-            "keep 20ms for best results",
-            false);
-        break;
-    case PageHelpDistance:
-        canvas_set_font(canvas, FontBatteryPercent);
-        canvas_draw_str_aligned(canvas, 124, 12, AlignRight, AlignBottom, "Help");
-        elements_text_box(
-            canvas,
-            4,
-            16,
-            120,
-            48,
-            AlignLeft,
-            AlignTop,
-            "\e#Distance\e# varies greatly:\n"
-            "some are long range (>30 m)\n"
-            "others are close range (<1 m)",
+            "\e#Delay\e# in sec is time spent\n"
+            "in F&B mode before switch\n"
+            "back to find mode.",
             false);
         break;
     case PageHelpInfoConfig:
@@ -461,9 +443,7 @@ static void draw_callback(Canvas* canvas, void* _ctx) {
             48,
             AlignLeft,
             AlignTop,
-            "App+Spam: \e#WillyJL\e# MNTM\n"
-            "Apple+Crash: \e#ECTO-1A\e#\n"
-            "Android+Win: \e#Spooks4576\e#\n"
+            "App Author: \e#michael2to3\e#\n"
             "                                   Version \e#" FAP_VERSION "\e#",
             false);
         break;
