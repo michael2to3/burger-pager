@@ -15,6 +15,15 @@
 
 static Attack attacks[] = {
     {
+        .title = "Mass attack",
+        .text = "Do everything with all pagers",
+        .protocol = NULL,
+        .payload =
+            {
+                .cfg = {},
+            },
+    },
+    {
         .title = "TD112 Call all pagers",
         .text = "Do beep in all undoc pagers",
         .protocol = &protocol_retekess_td112,
