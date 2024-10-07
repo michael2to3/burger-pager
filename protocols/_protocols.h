@@ -2,6 +2,7 @@
 
 #include "retekess_td112.h"
 #include "retekess_td157.h"
+#include "retekess_td158.h"
 
 typedef enum {
     PayloadModeFindAndBruteforce,
@@ -27,6 +28,7 @@ struct Payload {
     union {
         RetekessTd112Cfg retekess_td112;
         RetekessTd157Cfg retekess_td157;
+        RetekessTd158Cfg retekess_td158;
     } cfg;
 };
 

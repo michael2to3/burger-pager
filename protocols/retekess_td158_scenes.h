@@ -1,0 +1,5 @@
+ADD_SCENE(retekess_td158_mode, RetekessTd158Mode)
+ADD_SCENE(retekess_td158_station_id_start, RetekessTd158StationIdStart)
+ADD_SCENE(retekess_td158_station_id_end, RetekessTd158StationIdEnd)
+ADD_SCENE(retekess_td158_pager_id_start, RetekessTd158PagerIdStart)
+ADD_SCENE(retekess_td158_pager_id_end, RetekessTd158PagerIdEnd)

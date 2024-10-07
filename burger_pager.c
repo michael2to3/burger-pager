@@ -105,7 +105,7 @@ static Attack attacks[] = {
             },
     },
     {
-        .title = "Kromix W2270 Turn off",
+        .title = "W2270 Turn off",
         .text = "Turn off all doc pagers",
         .protocol = &protocol_retekess_td157,
         .payload =
@@ -122,7 +122,42 @@ static Attack attacks[] = {
                     },
             },
     },
-
+    {
+        .title = "TD158 Call all pagers",
+        .text = "Do beep in all undoc pagers",
+        .protocol = &protocol_retekess_td158,
+        .payload =
+            {
+                .subghz_protocol = "Princeton",
+                .frequency = 433920000,
+                .bits = 24,
+                .te = 228,
+                .repeat = 3,
+                .guard_time = 30,
+                .cfg.retekess_td158 =
+                    {
+                        .state = RetekessTd158StateBeep,
+                    },
+            },
+    },
+    {
+        .title = "TD158 Turn off",
+        .text = "Turn off all doc pagers",
+        .protocol = &protocol_retekess_td158,
+        .payload =
+            {
+                .subghz_protocol = "Princeton",
+                .frequency = 433920000,
+                .bits = 24,
+                .te = 228,
+                .repeat = 3,
+                .guard_time = 30,
+                .cfg.retekess_td158 =
+                    {
+                        .state = RetekessTd158StateTurnOff,
+                    },
+            },
+    },
 };
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
