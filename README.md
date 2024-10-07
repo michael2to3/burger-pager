@@ -1,20 +1,22 @@
 # Burger Pager
 
-Burger Pager is a Flipper Zero application modified from the original `ble_spam` app to work with pagers on SubGHz frequencies. It currently supports the Retekess TD112 protocol and features an intuitive interface for easy interaction.
+Burger Pager is a Flipper Zero app modified from the original `ble_spam` to work with pagers on SubGHz frequencies. It currently supports various protocols and features an intuitive interface for easy control and signal manipulation.
 
 ## Features
 
-- **Automatic Signal Search and Exploit**: Automatically find and spam all pagers nearby using the **Find and Bruteforce** mode.
-- **Bruteforce Mode**: Set custom `station_id` and `pager_id` and iterate through signals.
-- **Custom Attack Duration**: Adjust how long each attack should be executed.
+- **Automatic Signal Search and Exploit**: Automatically find and exploit all nearby pagers using the **Find and Bruteforce** mode.
+- **Bruteforce Mode**: Set custom `station_id` and `pager_id` values to iterate through signals.
+- **Custom Attack Duration**: Configure attack duration for precise control.
 - **User-Friendly Interface**: Enhanced GUI for simplified navigation and control.
 
 ## Supported Pagers
 
-- **Retekess TD112**
-- ~~Retekess TD157~~ (planned)
-- ~~Kromix W2270~~ (planned)
-- ~~Retekess TD158~~ (planned)
+| Pager Model          | Call | Turn Off | Tested |
+|----------------------|------|----------|--------|
+| **Retekess TD112**   | ✅   | ✅       | Yes    |
+| ~~Retekess TD157~~   | ❌   | ❌       | No     |
+| ~~Kromix W2270~~     | ❌   | ❌       | No     |
+| ~~Retekess TD158~~   | ❌   | ❌       | No     |
 
 ## How to Build and Run
 
@@ -39,4 +41,4 @@ Burger Pager is a Flipper Zero application modified from the original `ble_spam`
 - [Pagger](https://github.com/meoker/pagger)
 - [BLE Spam](https://github.com/John4E656F/fl-BLE_SPAM)
 
-Enjoy disrupting pagers responsibly!
+Enjoy responsibly testing pagers with Burger Pager!
