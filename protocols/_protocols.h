@@ -3,7 +3,7 @@
 #include "retekess_td112.h"
 
 typedef enum {
-    PayloadModeFind,
+    PayloadModeFindAndBruteforce,
     PayloadModeRandom,
     PayloadModeValue,
     PayloadModeBruteforce,

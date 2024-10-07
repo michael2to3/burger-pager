@@ -10,6 +10,10 @@ typedef struct {
     RetekessTd112State state;
     uint16_t station_id;
     uint16_t pager_id;
+    uint16_t start_station_id;
+    uint16_t end_station_id;
+    uint16_t start_pager_id;
+    uint16_t end_pager_id;
 } RetekessTd112Cfg;
 
 extern const Protocol protocol_retekess_td112;

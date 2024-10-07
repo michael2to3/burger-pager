@@ -20,12 +20,14 @@
 #include <lib/subghz/protocols/protocol_items.h>
 
 #include "scenes/_setup.h"
+#include "helpers/int_input.h"
 
 extern const char* LOGGING_TAG;
 
 enum {
     ViewMain,
     ViewByteInput,
+    ViewIntInput,
     ViewSubmenu,
     ViewTextInput,
     ViewVariableItemList,
@@ -51,6 +53,7 @@ typedef struct {
     SceneManager* scene_manager;
 
     ByteInput* byte_input;
+    IntInput* int_input;
     Submenu* submenu;
     TextInput* text_input;
     VariableItemList* variable_item_list;

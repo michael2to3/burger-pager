@@ -1,0 +1,2 @@
+ADD_SCENE(retekess_td112_mode, RetekessTd112Mode)
+ADD_SCENE(retekess_td112_station_id_start, RetekessTd112StationIdStart)

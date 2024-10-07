@@ -18,6 +18,7 @@ typedef struct {
     const Icon* icon;
     const char* (*get_name)(const Payload* payload);
     void (*make_packet)(uint8_t* _size, uint8_t** _packet, Payload* payload);
+    void (*process_packet)(uint8_t size, uint8_t* packet, Payload* payload);
     void (*extra_config)(Ctx* ctx);
     uint8_t (*config_count)(const Payload* payload);
 } Protocol;

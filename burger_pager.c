@@ -154,7 +154,6 @@ static void subghz_receiver_callback(
     void* _state) {
     State* state = (State*)_state;
     Payload* payload = &attacks[state->index].payload;
-    UNUSED(payload);
 
     if(decoder_base->protocol->type == SubGhzProtocolTypeStatic) {
         FuriString* buffer = furi_string_alloc();
@@ -162,19 +161,22 @@ static void subghz_receiver_callback(
         subghz_receiver_reset(receiver);
         FURI_LOG_I(LOGGING_TAG, "Captured:\r\n%s", furi_string_get_cstr(buffer));
 
-        const uint8_t size_package = 3;
-        uint8_t package[size_package];
-        memset(package, 0, size_package);
+        const uint8_t size = 3;
+        uint8_t packet[size];
+        memset(packet, 0, size);
         char* key_str = alloc_extract_value_from_string("Key", furi_string_get_cstr(buffer));
-        convert_key_to_data(key_str, package, size_package);
+        convert_key_to_data(key_str, packet, size);
         UNUSED(key_str);
 
         FURI_LOG_D(
             LOGGING_TAG,
             "Success parsed captured package to %02X %02X %02X",
-            package[0],
-            package[1],
-            package[2]);
+            packet[0],
+            packet[1],
+            packet[2]);
+
+        const Protocol* protocol = attacks[state->index].protocol;
+        protocol->process_packet(size, packet, payload);
     }
     subghz_receiver_reset(receiver);
 }
@@ -681,6 +683,9 @@ int32_t state_free(State* state) {
     view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewByteInput);
     byte_input_free(state->ctx.byte_input);
 
+    view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewIntInput);
+    int_input_free(state->ctx.int_input);
+
     view_dispatcher_remove_view(state->ctx.view_dispatcher, ViewSubmenu);
     submenu_free(state->ctx.submenu);
 
@@ -741,6 +746,10 @@ int32_t burger_pager(void* p) {
     state->ctx.byte_input = byte_input_alloc();
     view_dispatcher_add_view(
         state->ctx.view_dispatcher, ViewByteInput, byte_input_get_view(state->ctx.byte_input));
+
+    state->ctx.int_input = int_input_alloc();
+    view_dispatcher_add_view(
+        state->ctx.view_dispatcher, ViewIntInput, int_input_get_view(state->ctx.int_input));
 
     state->ctx.submenu = submenu_alloc();
     view_dispatcher_add_view(
