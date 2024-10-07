@@ -1,48 +1,48 @@
-#include "retekess_td112.h"
+#include "retekess_td157.h"
 #include "_protocols.h"
 #include "../helpers/log.h"
 
 static const char* get_name(const Payload* payload) {
     UNUSED(payload);
-    return "Retekess TD112";
+    return "Retekess TD157";
 }
 
 static uint16_t extract_station_id(const uint8_t* packet) {
     uint32_t key = (packet[0] << 16) | (packet[1] << 8) | packet[2];
-    uint16_t station_id = (key >> 12) & 0x0FFF;
+    uint16_t station_id = (key >> 14) & 0x03FF;
     return station_id;
 }
 
-static uint8_t reverse_byte(uint8_t b) {
-    b = ((b & 0xF0) >> 4) | ((b & 0x0F) << 4);
-    b = ((b & 0xCC) >> 2) | ((b & 0x33) << 2);
-    b = ((b & 0xAA) >> 1) | ((b & 0x55) << 1);
-    return b;
-}
+void encode_retekess_td157(uint16_t station_id, uint16_t pager_id, uint8_t action, uint8_t* packet) {
+    FURI_LOG_D(
+        LOGGING_TAG,
+        "Encoding station_id: %u, pager_id: %u, action: %u",
+        station_id,
+        pager_id,
+        action);
 
-void encode_retekess_td112(uint16_t station_id, uint16_t pager_id, uint8_t* packet) {
-    FURI_LOG_D(LOGGING_TAG, "Encoding station_id: %u, pager_id: %u", station_id, pager_id);
+    if(station_id > 1023) {
+        FURI_LOG_E(LOGGING_TAG, "Station ID out of range: %u (must be <= 1023)", station_id);
+        return;
+    }
+    if(pager_id > 1023) {
+        FURI_LOG_E(LOGGING_TAG, "Pager ID out of range: %u (must be <= 1023)", pager_id);
+        return;
+    }
+    if(action > 15) {
+        FURI_LOG_E(LOGGING_TAG, "Action ID out of range: %u (must be <= 15)", action);
+        return;
+    }
 
-    memset(packet, 0, 8);
+    uint32_t message = (station_id << 14) | (pager_id << 4) | action;
 
-    uint16_t base_key = station_id & 0x0FFF;
-
-    uint8_t group_num_input = (pager_id / 256) << 2;
-    uint8_t group_num_reversed = reverse_byte(group_num_input);
-    uint8_t group_number = (group_num_reversed >> 4) & 0x0F;
-
-    uint8_t pager_key_input = pager_id % 256;
-    uint8_t pager_key_reversed = reverse_byte(pager_key_input);
-
-    uint32_t key = (base_key << 12) | (group_number << 8) | pager_key_reversed;
-
-    packet[0] = (uint8_t)((key >> 16) & 0xFF);
-    packet[1] = (uint8_t)((key >> 8) & 0xFF);
-    packet[2] = (uint8_t)(key & 0xFF);
+    packet[0] = (message >> 16) & 0xFF;
+    packet[1] = (message >> 8) & 0xFF;
+    packet[2] = message & 0xFF;
 }
 
 static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
-    RetekessTd112Cfg* cfg = &payload->cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &payload->cfg.retekess_td157;
 
     uint16_t station_id;
     uint16_t pager_id;
@@ -91,9 +91,9 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
     const uint8_t size = 3;
     uint8_t* packet = (uint8_t*)calloc(size, sizeof(uint8_t));
 
-    uint16_t action = cfg->state == RetekessTd112StateTurnOff ? 1005 : pager_id;
+    uint16_t action = cfg->state == RetekessTd157StateTurnOff ? 15 : 2;
 
-    encode_retekess_td112(station_id, action, packet);
+    encode_retekess_td157(station_id, pager_id, action, packet);
 
     *_size = size;
     *_packet = packet;
@@ -103,7 +103,7 @@ static void process_packet(uint8_t size, uint8_t* packet, Payload* payload) {
     if(size != 3) {
         return;
     }
-    payload->cfg.retekess_td112.station_id = extract_station_id(packet);
+    payload->cfg.retekess_td157.station_id = extract_station_id(packet);
 }
 
 enum {
@@ -116,7 +116,7 @@ static void config_callback(void* _ctx, uint32_t index) {
     scene_manager_set_scene_state(ctx->scene_manager, SceneConfig, index);
     switch(index) {
     case ConfigMode:
-        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd112Mode);
+        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd157Mode);
         break;
     default:
         ctx->fallback_config_enter(ctx, index);
@@ -166,7 +166,7 @@ static uint8_t config_count(const Payload* payload) {
 
 static void check_and_set_bruteforce(Ctx* ctx) {
     Payload* payload = &ctx->attack->payload;
-    RetekessTd112Cfg* cfg = &payload->cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &payload->cfg.retekess_td157;
     uint32_t start_station_id = cfg->start_station_id;
     uint32_t end_station_id = cfg->end_station_id;
     uint32_t start_pager_id = cfg->start_pager_id;
@@ -182,19 +182,19 @@ static void mode_callback(void* _ctx, uint32_t index) {
     Ctx* ctx = _ctx;
     Payload* payload = &ctx->attack->payload;
     if(index == 1) {
-        if(ctx->attack->payload.cfg.retekess_td112.state != RetekessTd112StateTurnOff) {
-            scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd112PagerIdEnd);
-            scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd112PagerIdStart);
+        if(ctx->attack->payload.cfg.retekess_td157.state != RetekessTd157StateTurnOff) {
+            scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd157PagerIdEnd);
+            scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd157PagerIdStart);
         }
-        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd112StationIdEnd);
-        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd112StationIdStart);
+        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd157StationIdEnd);
+        scene_manager_next_scene(ctx->scene_manager, SceneRetekessTd157StationIdStart);
         check_and_set_bruteforce(ctx);
     } else {
         payload->mode = PayloadModeFindAndBruteforce;
         view_dispatcher_send_custom_event(ctx->view_dispatcher, 0);
     }
 }
-void scene_retekess_td112_mode_on_enter(void* _ctx) {
+void scene_retekess_td157_mode_on_enter(void* _ctx) {
     Ctx* ctx = _ctx;
     Payload* payload = &ctx->attack->payload;
     Submenu* submenu = ctx->submenu;
@@ -214,7 +214,7 @@ void scene_retekess_td112_mode_on_enter(void* _ctx) {
     submenu_set_selected_item(submenu, selected);
     view_dispatcher_switch_to_view(ctx->view_dispatcher, ViewSubmenu);
 }
-bool scene_retekess_td112_mode_on_event(void* _ctx, SceneManagerEvent event) {
+bool scene_retekess_td157_mode_on_event(void* _ctx, SceneManagerEvent event) {
     Ctx* ctx = _ctx;
     if(event.type == SceneManagerEventTypeCustom) {
         scene_manager_previous_scene(ctx->scene_manager);
@@ -222,13 +222,13 @@ bool scene_retekess_td112_mode_on_event(void* _ctx, SceneManagerEvent event) {
     }
     return false;
 }
-void scene_retekess_td112_mode_on_exit(void* _ctx) {
+void scene_retekess_td157_mode_on_exit(void* _ctx) {
     Ctx* ctx = _ctx;
     submenu_reset(ctx->submenu);
 }
 static void station_id_start_input_callback(void* _ctx) {
     Ctx* ctx = _ctx;
-    RetekessTd112Cfg* cfg = &ctx->attack->payload.cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &ctx->attack->payload.cfg.retekess_td157;
     cfg->start_station_id = (uint16_t)strtoul(ctx->text_store, NULL, 10);
     FURI_LOG_D(LOGGING_TAG, "Start Station ID: %u", cfg->start_station_id);
     view_dispatcher_send_custom_event(ctx->view_dispatcher, 0);
@@ -236,7 +236,7 @@ static void station_id_start_input_callback(void* _ctx) {
 
 static void station_id_end_input_callback(void* _ctx) {
     Ctx* ctx = _ctx;
-    RetekessTd112Cfg* cfg = &ctx->attack->payload.cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &ctx->attack->payload.cfg.retekess_td157;
     cfg->end_station_id = (uint16_t)strtoul(ctx->text_store, NULL, 10);
     FURI_LOG_D(LOGGING_TAG, "End Station ID: %u", cfg->end_station_id);
     view_dispatcher_send_custom_event(ctx->view_dispatcher, 0);
@@ -244,7 +244,7 @@ static void station_id_end_input_callback(void* _ctx) {
 
 static void pager_id_start_input_callback(void* _ctx) {
     Ctx* ctx = _ctx;
-    RetekessTd112Cfg* cfg = &ctx->attack->payload.cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &ctx->attack->payload.cfg.retekess_td157;
     cfg->start_pager_id = (uint16_t)strtoul(ctx->text_store, NULL, 10);
     FURI_LOG_D(LOGGING_TAG, "Start Pager ID: %u", cfg->start_pager_id);
     view_dispatcher_send_custom_event(ctx->view_dispatcher, 0);
@@ -252,7 +252,7 @@ static void pager_id_start_input_callback(void* _ctx) {
 
 static void pager_id_end_input_callback(void* _ctx) {
     Ctx* ctx = _ctx;
-    RetekessTd112Cfg* cfg = &ctx->attack->payload.cfg.retekess_td112;
+    RetekessTd157Cfg* cfg = &ctx->attack->payload.cfg.retekess_td157;
     cfg->end_pager_id = (uint16_t)strtoul(ctx->text_store, NULL, 10);
     FURI_LOG_D(LOGGING_TAG, "End Pager ID: %u", cfg->end_pager_id);
     view_dispatcher_send_custom_event(ctx->view_dispatcher, 0);
@@ -270,22 +270,22 @@ static void create_int_input_view(const char* message, IntInputCallback callback
     view_dispatcher_switch_to_view(ctx->view_dispatcher, ViewIntInput);
 }
 
-void scene_retekess_td112_station_id_start_on_enter(void* _ctx) {
+void scene_retekess_td157_station_id_start_on_enter(void* _ctx) {
     Ctx* ctx = _ctx;
     create_int_input_view("START Station Id (0-9999)", station_id_start_input_callback, ctx);
 }
 
-void scene_retekess_td112_station_id_end_on_enter(void* _ctx) {
+void scene_retekess_td157_station_id_end_on_enter(void* _ctx) {
     Ctx* ctx = _ctx;
     create_int_input_view("END Station Id (0-9999)", station_id_end_input_callback, ctx);
 }
 
-void scene_retekess_td112_pager_id_start_on_enter(void* _ctx) {
+void scene_retekess_td157_pager_id_start_on_enter(void* _ctx) {
     Ctx* ctx = _ctx;
     create_int_input_view("START Pager Id (0-999)", pager_id_start_input_callback, ctx);
 }
 
-void scene_retekess_td112_pager_id_end_on_enter(void* _ctx) {
+void scene_retekess_td157_pager_id_end_on_enter(void* _ctx) {
     Ctx* ctx = _ctx;
     create_int_input_view("END Pager Id (0-999)", pager_id_end_input_callback, ctx);
 }
@@ -299,33 +299,33 @@ static bool input_on_event(void* _ctx, SceneManagerEvent event) {
     return false;
 }
 
-bool scene_retekess_td112_station_id_start_on_event(void* _ctx, SceneManagerEvent event) {
+bool scene_retekess_td157_station_id_start_on_event(void* _ctx, SceneManagerEvent event) {
     return input_on_event(_ctx, event);
 }
-bool scene_retekess_td112_station_id_end_on_event(void* _ctx, SceneManagerEvent event) {
+bool scene_retekess_td157_station_id_end_on_event(void* _ctx, SceneManagerEvent event) {
     return input_on_event(_ctx, event);
 }
-bool scene_retekess_td112_pager_id_start_on_event(void* _ctx, SceneManagerEvent event) {
+bool scene_retekess_td157_pager_id_start_on_event(void* _ctx, SceneManagerEvent event) {
     return input_on_event(_ctx, event);
 }
-bool scene_retekess_td112_pager_id_end_on_event(void* _ctx, SceneManagerEvent event) {
+bool scene_retekess_td157_pager_id_end_on_event(void* _ctx, SceneManagerEvent event) {
     return input_on_event(_ctx, event);
 }
-void scene_retekess_td112_station_id_start_on_exit(void* _ctx) {
+void scene_retekess_td157_station_id_start_on_exit(void* _ctx) {
     UNUSED(_ctx);
 }
-void scene_retekess_td112_station_id_end_on_exit(void* _ctx) {
+void scene_retekess_td157_station_id_end_on_exit(void* _ctx) {
     UNUSED(_ctx);
 }
-void scene_retekess_td112_pager_id_start_on_exit(void* _ctx) {
+void scene_retekess_td157_pager_id_start_on_exit(void* _ctx) {
     UNUSED(_ctx);
 }
-void scene_retekess_td112_pager_id_end_on_exit(void* _ctx) {
+void scene_retekess_td157_pager_id_end_on_exit(void* _ctx) {
     UNUSED(_ctx);
 }
 
-const Protocol protocol_retekess_td112 = {
-    .icon = &I_td112,
+const Protocol protocol_retekess_td157 = {
+    .icon = &I_td157,
     .get_name = get_name,
     .make_packet = make_packet,
     .process_packet = process_packet,
