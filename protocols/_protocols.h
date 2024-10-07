@@ -19,6 +19,7 @@ struct Payload {
     PayloadMode mode;
     struct {
         uint8_t counter;
+        uint8_t counter_limit;
         uint32_t value;
         uint8_t size;
     } bruteforce;

