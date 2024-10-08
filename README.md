@@ -1,5 +1,9 @@
 # Burger Pager
 
+<div align="center">
+   <img src=".readme/demo.gif"/>
+</div>
+
 Burger Pager is a Flipper Zero application that allows you to interact with restaurant pager systems using Sub-GHz frequencies. This tool can find, exploit, and send signals to various pagers, enabling you to test the security and functionality of these devices.
 
 ## Features
