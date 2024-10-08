@@ -48,7 +48,7 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
     uint16_t pager_id;
     uint32_t total_combinations;
 
-    payload->bruteforce.counter_limit = 3;
+    payload->bruteforce.counter_limit = 2;
 
     switch(payload->mode) {
     case PayloadModeBruteforce:

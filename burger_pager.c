@@ -446,7 +446,8 @@ static void
 
 static void start_find_and_bruteforce(State* state) {
     uint16_t period = delays[state->delay] * 1000;
-    uint32_t duration = period * (ATTACKS_COUNT - 1);
+    const Protocol* protocol = attacks[state->index].protocol;
+    uint32_t duration = period * (protocol == NULL ? (ATTACKS_COUNT - 1) : 1);
     uint32_t current_time = furi_get_tick();
     uint32_t elapsed_time = current_time - state->last_switch_time;
 
@@ -477,7 +478,7 @@ static void start_find_and_bruteforce(State* state) {
                 subghz_devices_stop_async_tx(state->device);
             }
         } else {
-            if(attacks[state->index].protocol == NULL) {
+            if(protocol == NULL) {
                 for(int i = 1; i < ATTACKS_COUNT; i++) {
                     Attack* attack = &attacks[i];
                     Payload* attack_payload = &attack->payload;
@@ -554,6 +555,8 @@ static int32_t adv_thread(void* _ctx) {
     while(state->advertising) {
         process_bruteforce(state);
         start_attack(state);
+
+        furi_delay_ms(10);
 
         if(subghz_devices_is_async_complete_tx(state->device)) {
             subghz_devices_stop_async_tx(state->device);
