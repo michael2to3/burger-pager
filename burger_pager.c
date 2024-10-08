@@ -36,7 +36,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td112 =
                     {
@@ -54,7 +54,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td112 =
                     {
@@ -72,7 +72,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td157 =
                     {
@@ -90,7 +90,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td157 =
                     {
@@ -108,7 +108,7 @@ static Attack attacks[] = {
                 .frequency = 315000000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td157 =
                     {
@@ -126,7 +126,7 @@ static Attack attacks[] = {
                 .frequency = 315000000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td157 =
                     {
@@ -144,7 +144,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td158 =
                     {
@@ -162,7 +162,7 @@ static Attack attacks[] = {
                 .frequency = 433920000,
                 .bits = 24,
                 .te = 228,
-                .repeat = 3,
+                .repeat = 1,
                 .guard_time = 30,
                 .cfg.retekess_td158 =
                     {
@@ -174,7 +174,7 @@ static Attack attacks[] = {
 
 #define ATTACKS_COUNT ((signed)COUNT_OF(attacks))
 
-static uint16_t delays[] = {5, 10, 20, 50};
+static uint16_t delays[] = {10, 25, 40, 80};
 
 const NotificationSequence solid_message = {
     &message_red_0,
