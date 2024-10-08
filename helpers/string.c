@@ -30,7 +30,6 @@ char* alloc_extract_value_from_string(const char* key, const char* input_str) {
 }
 
 void convert_key_to_data(const char* key_value_str, uint8_t* data, uint8_t size) {
-    memset(data, 0, size);
     uint64_t key_value = 0;
 
     for(const char* ptr = key_value_str; *ptr; ptr++) {
