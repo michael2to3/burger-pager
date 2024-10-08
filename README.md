@@ -78,10 +78,6 @@ The application currently supports the following pager models:
 - [Pagger](https://github.com/meoker/pagger): An inspiration for interacting with pager systems.
 - [BLE Spam](https://github.com/John4E656F/fl-BLE_SPAM): Original project modified to create Burger Pager.
 
-## License
-
-This project is licensed under the [MIT License](LICENSE).
-
 ## Contributing
 
 Contributions are welcome! If you have suggestions for improvements or new features, please open an issue or submit a pull request.
