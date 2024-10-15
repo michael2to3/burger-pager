@@ -50,10 +50,12 @@ static void make_packet(uint8_t* _size, uint8_t** _packet, Payload* payload) {
 
     payload->bruteforce.counter_limit = 1;
 
+    uint32_t num_station_ids;
+    uint32_t num_pager_ids;
     switch(payload->mode) {
     case PayloadModeBruteforce:
-        uint32_t num_station_ids = cfg->end_station_id - cfg->start_station_id + 1;
-        uint32_t num_pager_ids = cfg->end_pager_id - cfg->start_pager_id + 1;
+        num_station_ids = cfg->end_station_id - cfg->start_station_id + 1;
+        num_pager_ids = cfg->end_pager_id - cfg->start_pager_id + 1;
         total_combinations = num_station_ids * num_pager_ids;
 
         payload->bruteforce.size = sizeof(uint32_t);
